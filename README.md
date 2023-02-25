@@ -7,7 +7,9 @@ CO2 sensor: Senseair S8 with PWM out (0..2000 PPM)
   
 Setup with Flipper Zero app "nRF24 Batch" within 15 seconds after power on.  
 Default nRF24l01 settings:  
-Address: C8C8CF  
+Setup RX address: C8C8CF
+Fans over air: 1
+Fan 1 address: C8C8C1
 Channel: 121  
 Data rate: 1 Mbps  
 CRC: 2 byte  
