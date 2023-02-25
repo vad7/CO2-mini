@@ -6,6 +6,14 @@ Radio: nRF24l01+ mini SMD
 CO2 sensor: Senseair S8 with PWM out (0..2000 PPM)  
   
 Setup with Flipper Zero app "nRF24 Batch" within 15 seconds after power on.  
+Default nRF24l01 settings:  
+Address: C8C8CF  
+Channel: 121  
+Data rate: 1 Mbps  
+CRC: 2 byte  
+Send CO2 value period: 30 sec  
+Reset settings - press KEY more than 10 sec after power on.  
+
 <br>
 <img src="https://raw.githubusercontent.com/vad7/CO2-mini/master/3D.png">
 <br>
