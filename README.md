@@ -1,5 +1,5 @@
 # CO2-mini
-Sends the CO2 value received from the Senseair S8 sensor (PWM out) using nRF24l01
+Sends the CO2 value received from the Senseair S8 sensor (PWM out) using nRF24l01 mini
 <br>
 <br>
 <br>
