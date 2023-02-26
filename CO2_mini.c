@@ -102,7 +102,7 @@ volatile uint8_t Timer				= 0;
 uint8_t Key1Pressing				= 0;
 int16_t CO2Level					= 0;
 int16_t CO2Level_correct			= 0;
-//uint8_t CO2Level_new				= 0;
+uint8_t CO2Level_new				= 0;	// if > 0 then decrement on timer overflow, if = 0 then CO2 = MAX
 
 #if(1)
 void Delay10us(uint8_t ms) {
@@ -157,8 +157,13 @@ ISR(TIM1_CAPT_vect)
 		uint16_t n = (TCNT1_last - TCNT1_prev + CO2_PWM_Add) / 2;  // tick = 0.5us, 2000 ppm = 1ms
 		if(n > CO2SensorMax) n = CO2SensorMax; else n += CO2Level_correct;
 		CO2Level = (CO2Level + n) / 2;
-		//CO2Level_new = 1;
+		CO2Level_new = 2;
 	}
+}
+
+ISR(TIM1_OVF_vect) // there is no pulses - max value
+{
+	if(CO2Level_new) CO2Level_new--; else CO2Level = CO2SensorMax;
 }
 
 uint8_t TimerCnt = 0;
@@ -256,7 +261,7 @@ int main(void)
 	TCCR1A = (1<<WGM11) | (1<<WGM10);  // Timer1: Fast PWM Top OCR1A (15)
 	TCCR1B = (1<<ICES1) | (0<<ICNC1) | (1<<WGM13) | (1<<WGM12) | (0<<CS12) | (0<<CS11) | (1<<CS10); // Timer1: /1, Input Capture Rising Edge
 	OCR1A = 0xFFFF; // =Fclk/prescaller/Freq - 1; Freq=Fclk/(prescaller*(1+TOP)). resolution 0.5us/2
-	TIMSK1 = (1<<ICIE1); // Timer/Counter1: Input Capture Interrupt Enable
+	TIMSK1 = (1<<ICIE1) | (1<<TOIE1); // Timer/Counter1: Input Capture Interrupt Enable
 	// ADC
  	//ADMUX = (0<<REFS1) | (1<<MUX2)|(1<<MUX1)|(1<<MUX0); // ADC7 (PA7)
  	//ADCSRA = (1<<ADEN) | (0<<ADATE) | (1<<ADIE) | (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0); // ADC enable, Free Running mode, Interrupt, ADC 128 divider
@@ -382,6 +387,10 @@ int main(void)
 		} while(Timer);
 	}
 	NRF24_SetMode(NRF24_TransmitMode);
+	uint8_t n = eeprom_read_byte(&EEPROM.SendPeriod);
+	if(n < 128) n *= 2;
+	Timer = n;
+	n = 0;
 	while(1)
 	{
 		__asm__ volatile ("" ::: "memory"); // Need memory barrier
@@ -392,19 +401,21 @@ int main(void)
 			data.FanSpeed = data.Flags = 0;
 			ATOMIC_BLOCK(ATOMIC_FORCEON) { data.CO2level = CO2Level; }
 			if(data.CO2level > (int16_t)eeprom_read_word((uint16_t*)&EEPROM.CO2_Threshold)) data.FanSpeed = 1;
-			for(uint8_t fan = 0; fan < MAX_FANS; fan++)
-			{
+			uint8_t fan = 0;
+			for(; fan < MAX_FANS; fan++) {
 				uint8_t addr = eeprom_read_byte(&EEPROM.RF_FanAddr[fan]);
 				if(addr == 0) break;
-				if(!NRF24_SetAddresses(addr))
-				{
-					Set_LED_Warning(WRN_RF_SetAddr);
-					break;
+				if(n != 1) { // if only 1 fan - skip:
+					if(!NRF24_SetAddresses(addr)) {
+						Set_LED_Warning(WRN_RF_SetAddr);
+						break;
+					}
 				}
 				uint8_t err = NRF24_Transmit((uint8_t *)&data);
 				uint8_t err2 = err == 2 ? WRN_RF_NotResp : (WRN_RF_Send + fan + 1);
 				if(err)	Set_LED_Warning(err2);
 			}
+			n = fan;
 			//NRF24_Powerdown();
 			Timer = eeprom_read_byte(&EEPROM.SendPeriod);
 		}
