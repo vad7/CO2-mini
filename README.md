@@ -3,7 +3,7 @@ Sends the CO2 value received from the Senseair S8 sensor (PWM out) using nRF24l0
 <br>
 <br>Microcontroller: AVR Attiny44A  
 Radio: nRF24l01+ mini SMD  
-CO2 sensor: Senseair S8 with PWM out (0..2000 PPM)  
+CO2 sensor: Senseair S8 with PWM 1kHz out (0..2000 PPM)  
   
 Setup with Flipper Zero app "nRF24 Batch" within 15 seconds after power on.  
 Default nRF24l01 settings:  
