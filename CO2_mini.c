@@ -234,8 +234,8 @@ void ResetSettings(void)
 {
 	//eeprom_update_byte(&EEPROM._OSCCAL, OSCCAL);
 	eeprom_update_byte(&EEPROM.RF_RxAddress, 0xCF);
-	eeprom_update_byte(&EEPROM.RF_Channel, 121);
-	eeprom_update_byte(&EEPROM.RF_REG_SETUP_RETR, (0b0000<<NRF24_BIT_ARD) | (0b1111<<NRF24_BIT_ARC)); // Auto Retransmit Delay,  Re-Transmit on fail
+	eeprom_update_byte(&EEPROM.RF_Channel, 122);
+	eeprom_update_byte(&EEPROM.RF_REG_SETUP_RETR, (0b0000<<NRF24_BIT_ARD) | (0b0011<<NRF24_BIT_ARC)); // Auto Retransmit Delay,  Re-Transmit on fail
 	eeprom_update_byte(&EEPROM.SendPeriod, 30); // sec
 	eeprom_update_word((uint16_t*)&EEPROM.CO2_Threshold, 1000); // ppm
 	eeprom_update_word((uint16_t*)&EEPROM.CO2_correct, 0);
