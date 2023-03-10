@@ -10,7 +10,7 @@ Default nRF24l01 settings:
 Setup RX address: C8C8CF
 Fans over air: 1
 Fan 1 address: C8C8C1
-Channel: 121  
+Channel: 122  
 Data rate: 1 Mbps  
 CRC: 2 byte  
 Send CO2 value period: 30 sec  
