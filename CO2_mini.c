@@ -254,7 +254,7 @@ void ResetSettings(void)
 	eeprom_update_word((uint16_t*)&EEPROM.CO2_correct, 0);
 	eeprom_update_byte(&EEPROM.RF_FanAddr[0], 0xC1);
 	eeprom_update_byte(&EEPROM.RF_FanAddr[1], 0);	// after last => 0
-	eeprom_update_byte(&EEPROM.RF_Pause, 10);		// sec
+	eeprom_update_byte(&EEPROM.RF_Pause, 1);		// msec
 	eeprom_update_byte(&EEPROM.Flags, 0);			// Receive/Transmit
 }
 
@@ -371,7 +371,7 @@ int main(void)
 					Set_LED_Warning(2);
 					WriteTimeout = 5; // *0.1 sec
 				}
-				Timer = 255; // sec
+				Setup_timer = 255; // sec
 			} else if((p->Flags == fSetup_Read + fSetup_1b || p->Flags == fSetup_Read + fSetup_2b)) { // setup READ command
 				if(p->Type == Type_EEPROM) {
 					if(p->Data < sizeof(struct _EEPROM)) {
@@ -406,9 +406,11 @@ int main(void)
 				} else err = NRF24_Transmit((uint8_t *)&data);
 				NRF24_SetMode(NRF24_ReceiveMode);
 				if(err) Set_LED_Warning_New(err == 2 ? WRN_RF_NotResp : WRN_SETUP_ERR + err);
-				Timer = 255; // sec
+				Setup_timer = 255; // sec
 			}
-		} else if(Timer == 0) {
+			continue;
+		} 
+		if(Timer == 0) {
 			NRF24_SetMode(NRF24_TransmitMode);
 			data.FanSpeed = data.Flags = 0;
 			ATOMIC_BLOCK(ATOMIC_FORCEON) { data.CO2level = CO2Level; }
@@ -423,8 +425,12 @@ int main(void)
 				uint8_t err = NRF24_Transmit((uint8_t *)&data);
 				if(err)	Set_LED_Warning(err == 2 ? WRN_RF_NotResp : (WRN_RF_Send + fan + 1));
 			}
-			if(!Setup_timer && (Flags & f_TransmitOnly)) NRF24_SET_CE_LOW; // Standby-1
-			else NRF24_SetMode(NRF24_ReceiveMode);
+			if(!Setup_timer && (Flags & f_TransmitOnly)) {
+				NRF24_SET_CE_LOW; // Standby-1
+			} else {
+				if(!NRF24_SetAddresses(eeprom_read_byte(&EEPROM.RF_RxAddress))) Set_LED_Warning(WRN_RF_SetAddr);
+				NRF24_SetMode(NRF24_ReceiveMode);
+			}
 			Timer = eeprom_read_byte(&EEPROM.SendPeriod);
 		}
 	}

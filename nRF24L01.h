@@ -102,7 +102,7 @@ uint8_t NRF24_Buffer[NRF24_PAYLOAD_LEN]; // MUST be EQUAL or GREATER than Addres
 #define NRF24_TransmitMode			0
 
 const uint8_t NRF24_INIT_DATA[] PROGMEM = {
-//	NRF24_CMD_W_REGISTER | NRF24_REG_FEATURE,	(0<<NRF24_BIT_EN_DPL) | (0<<NRF24_BIT_EN_ACK_PAY), // Dynamic Payload Length, Enables Payload with ACK
+//	NRF24_CMD_W_REGISTER | NRF24_REG_FEATURE,	(0<<NRF24_BIT_EN_DPL) | (0<<NRF24_BIT_EN_ACK_PAY) | (0<<NRF24_BIT_EN_DYN_ACK), // Dynamic Payload Length, Enables Payload with ACK
 //	NRF24_CMD_W_REGISTER | NRF24_REG_DYNPD,		0b000000, // Dynamic payload
 //	NRF24_CMD_W_REGISTER | NRF24_REG_RF_CH,		NRF24_RF_CHANNEL, // RF channel
 	NRF24_CMD_W_REGISTER | NRF24_REG_SETUP_AW,	NRF24_ADDRESS_LEN - 2, // address length
