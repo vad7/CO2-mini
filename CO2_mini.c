@@ -86,7 +86,7 @@ struct _EEPROM EEMEM EEPROM;
 #define Type_RAM					1	// main memory (OSCCAL=0x51)
 #define Type_PROGMEM				2	// Program FLASH
 #define Type_PGM_ID					3	// ProgramID(cstring)
-#define Type_RESET					4	// Restart program
+#define Type_RESET					4	// Restart program (fSetup_Read)
 
 struct SETUP_DATA { // the same size as SEND_DATA!
 	uint16_t Data;	// Read/Write byte or word
