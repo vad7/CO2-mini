@@ -77,16 +77,18 @@ struct _EEPROM {
 } __attribute__ ((packed));
 struct _EEPROM EEMEM EEPROM;
 
-#define fSetup_Write				0x80 // EEPROM[Type] = Data
-#define fSetup_WriteStart			0x8F
-#define fSetup_Read					0xC0 // read MEM[Data] => Data, MEM type: EEPROM, MAIN, PROGRAM
-#define fSetup_1b					0x01
-#define fSetup_2b					0x02
+#define fCMD_Write					0x80 // EEPROM[Type] = Data
+#define fCMD_WriteStart				0x8F
+#define fCMD_Read					0xC0 // read MEM[Data] => Data, MEM type: EEPROM, MAIN, PROGRAM
+#define fCMD_1b						0x01
+#define fCMD_2b						0x02
+#define fCMD_Set					0x40 // Set cmd, Type = cmd id, Data = cmd value
 #define Type_EEPROM					0	// EEPROM
 #define Type_RAM					1	// main memory (OSCCAL=0x51)
 #define Type_PROGMEM				2	// Program FLASH
 #define Type_PGM_ID					3	// ProgramID(cstring)
 #define Type_RESET					4	// Restart program (fSetup_Read)
+#define Type_Set_LED				0	// LED ON(Data=1) or OFF(Data=0), bit num
 
 struct SETUP_DATA { // the same size as SEND_DATA!
 	uint16_t Data;	// Read/Write byte or word
@@ -111,6 +113,7 @@ int16_t CO2Level_correct			= 0;
 uint8_t CO2Level_new				= 0;	// if > 0 then decrement on timer overflow, if = 0 then CO2 = MAX
 uint8_t Flags;
 uint8_t Setup_timer					= 15;	// sec
+uint8_t CMD_Set_Flags				= 0;
 
 #if(1)
 void Delay10us(uint8_t ms) {
@@ -214,7 +217,7 @@ xSetPause:
 				LED_Warning_NoRepeat = 0;
 				LED_Warning = 0;
 			}
-		}
+		} else if(CMD_Set_Flags & (1<<Type_Set_LED)) LED1_ON;
 	}
 	NRF_poll = 1;
 }
@@ -359,10 +362,10 @@ int main(void)
 		struct SETUP_DATA *p = (struct SETUP_DATA*)&data;
 		if((Setup_timer || !(Flags & f_TransmitOnly)) && NRF24_Receive((uint8_t*)&data)) {
 			Set_LED_Warning(1);
-			if(p->Flags == fSetup_WriteStart) WriteTimeout = 5;  // *0.1 sec
-			else if((p->Flags == fSetup_Write + fSetup_1b || p->Flags == fSetup_Write + fSetup_2b)) { // setup WRITE command
+			if(p->Flags == fCMD_WriteStart) WriteTimeout = 5;  // *0.1 sec
+			else if((p->Flags == fCMD_Write + fCMD_1b || p->Flags == fCMD_Write + fCMD_2b)) { // WRITE command
 				if(p->Type < sizeof(struct _EEPROM) && WriteTimeout) {
-					if(p->Flags == fSetup_Write + fSetup_1b) {
+					if(p->Flags == fCMD_Write + fCMD_1b) {
 						eeprom_update_byte((uint8_t*)&EEPROM + p->Type, p->Data);
 					} else {
 						eeprom_update_word((uint16_t*)((uint8_t*)&EEPROM + p->Type), p->Data);
@@ -372,21 +375,28 @@ int main(void)
 					WriteTimeout = 5; // *0.1 sec
 				}
 				Setup_timer = 255; // sec
-			} else if((p->Flags == fSetup_Read + fSetup_1b || p->Flags == fSetup_Read + fSetup_2b)) { // setup READ command
+			} else if(p->Flags == fCMD_Set) { // SET command
+				if(p->Type == Type_Set_LED) {
+					uint8_t d = ((p->Data & 1)<<Type_Set_LED);
+					CMD_Set_Flags = (CMD_Set_Flags & ~(1<<Type_Set_LED)) | d;
+					if(!d) LED1_OFF;
+				}
+				Setup_timer = 255; // sec
+			} else if((p->Flags == fCMD_Read + fCMD_1b || p->Flags == fCMD_Read + fCMD_2b)) { // READ command
 				if(p->Type == Type_EEPROM) {
 					if(p->Data < sizeof(struct _EEPROM)) {
-						if(p->Flags == fSetup_Read + fSetup_1b) p->Data = eeprom_read_byte((uint8_t*)&EEPROM + p->Data);
+						if(p->Flags == fCMD_Read + fCMD_1b) p->Data = eeprom_read_byte((uint8_t*)&EEPROM + p->Data);
 						else p->Data = eeprom_read_word((uint16_t*)((uint8_t*)&EEPROM + p->Data));
 						p->Type = p->Flags = 0;
 					} else continue;
 				} else if(p->Type == Type_RAM) {
 					ATOMIC_BLOCK(ATOMIC_FORCEON) {
-						if(p->Flags == fSetup_Read + fSetup_1b) p->Data = *((uint8_t *)p->Data);
+						if(p->Flags == fCMD_Read + fCMD_1b) p->Data = *((uint8_t *)p->Data);
 						else p->Data = *((uint16_t *)p->Data);
 					}
 					p->Type = p->Flags = 0;
 				} else if(p->Type == Type_PROGMEM) {
-					if(p->Flags == fSetup_Read + fSetup_1b) p->Data = pgm_read_byte(p->Data);
+					if(p->Flags == fCMD_Read + fCMD_1b) p->Data = pgm_read_byte(p->Data);
 					else p->Data = pgm_read_word(p->Data);
 					p->Type = p->Flags = 0;
 				} else if(p->Type == Type_RESET) {
