@@ -77,22 +77,26 @@ struct _EEPROM {
 } __attribute__ ((packed));
 struct _EEPROM EEMEM EEPROM;
 
-#define fCMD_Write					0x80 // EEPROM[Type] = Data
-#define fCMD_WriteStart				0x8F
+#define fCMD_MASK					0xF0 // check mask
+#define fCMD_Write					0x80 // EEPROM[Type] = Data, "fCMD_WriteStart" must be preceded, timeout - fCMD_Write_Timeout
 #define fCMD_Read					0xC0 // read MEM[Data] => Data, MEM type: EEPROM, MAIN, PROGRAM
 #define fCMD_1b						0x01
 #define fCMD_2b						0x02
+#define fCMD_RAM					0x08
 #define fCMD_Set					0x40 // Set cmd, Type = cmd id, Data = cmd value
+#define fCMD_WriteStart				0x8F
 #define Type_EEPROM					0	// EEPROM
 #define Type_RAM					1	// main memory (OSCCAL=0x51)
 #define Type_PROGMEM				2	// Program FLASH
 #define Type_PGM_ID					3	// ProgramID(cstring)
 #define Type_RESET					4	// Restart program (fSetup_Read)
-#define Type_Set_LED				0	// LED ON(Data=1) or OFF(Data=0), bit num
+#define Type_Set_Lamp				0	// Lamp ON(Data=1) or OFF(Data=0), bit num
+
+#define fCMD_Write_Timeout			3	// *0.1 sec
 
 struct SETUP_DATA { // the same size as SEND_DATA!
 	uint16_t Data;	// Read/Write byte or word
-	uint8_t Type;	// Read data type(SetupType.*) or Write EEPROM address
+	uint8_t Type;	// Read data type(SetupType.*) or Write EEPROM addressfCMD_Write_Timeout
 	uint8_t Flags;	// Setup command: fSetup_*
 } __attribute__ ((packed));
 
@@ -105,7 +109,7 @@ struct SEND_DATA data;
 uint8_t WriteTimeout = 0;	// > 0 - Write starting
 
 volatile uint8_t LED_Warning		= 0; // Flashes, long (mask 0xF0):	0 - all ok, or ERR_*
-uint8_t LED_WarningOnCnt = 0, LED_WarningOffCnt = 0, LED_Warning_WorkLong = 0, LED_Warning_WorkShort = 0, LED_Warning_NoRepeat = 0;
+uint8_t LED_WarningOnCnt = 0, LED_WarningOffCnt = 0, LED_Warning_WorkLong = 0, LED_Warning_WorkShort = 0;
 volatile uint8_t Timer				= 0;
 volatile uint8_t NRF_poll			= 0;
 int16_t CO2Level					= 0;
@@ -213,28 +217,21 @@ xSetPause:
 		} else if(LED_Warning) {
 			LED_Warning_WorkLong = (LED_Warning & 0xF0) >> 4;
 			LED_Warning_WorkShort = LED_Warning & 0x0F;
-			if(LED_Warning_NoRepeat) {
-				LED_Warning_NoRepeat = 0;
-				LED_Warning = 0;
-			}
-		} else if(CMD_Set_Flags & (1<<Type_Set_LED)) LED1_ON;
+			LED_Warning = 0;
+		} else if(CMD_Set_Flags & (1<<Type_Set_Lamp)) LED1_ON;
 	}
 	NRF_poll = 1;
 }
 
 void Set_LED_Warning(uint8_t d)
 {
-	if(LED_Warning == 0) {
-		LED_Warning_NoRepeat = 1;
-		LED_Warning = d;
-	}
+	if(LED_Warning == 0) LED_Warning = d;
 }
 
 void Set_LED_Warning_New(uint8_t d)
 {
 	LED_Warning_WorkLong = LED_Warning_WorkShort = LED_WarningOnCnt = LED_WarningOffCnt = 0;
 	LED_Warning = d;
-	if(d) LED_Warning_NoRepeat = 1;
 	LED1_OFF;
 }
 
@@ -362,23 +359,32 @@ int main(void)
 		struct SETUP_DATA *p = (struct SETUP_DATA*)&data;
 		if((Setup_timer || !(Flags & f_TransmitOnly)) && NRF24_Receive((uint8_t*)&data)) {
 			Set_LED_Warning(1);
-			if(p->Flags == fCMD_WriteStart) WriteTimeout = 5;  // *0.1 sec
-			else if((p->Flags == fCMD_Write + fCMD_1b || p->Flags == fCMD_Write + fCMD_2b)) { // WRITE command
-				if(p->Type < sizeof(struct _EEPROM) && WriteTimeout) {
-					if(p->Flags == fCMD_Write + fCMD_1b) {
-						eeprom_update_byte((uint8_t*)&EEPROM + p->Type, p->Data);
+			register uint8_t cmd = p->Flags;
+			if(cmd == fCMD_WriteStart) {
+				WriteTimeout = fCMD_Write_Timeout;
+			} else if((cmd & fCMD_MASK) == fCMD_Write) { // WRITE command
+				if(WriteTimeout) {
+					if(cmd & fCMD_RAM) {
+						ATOMIC_BLOCK(ATOMIC_FORCEON) {
+							if(cmd & fCMD_2b) *((uint16_t *)(uint16_t)p->Type) = p->Data;
+							else *((uint8_t *)(uint16_t)p->Type) = p->Data;
+						}
 					} else {
-						eeprom_update_word((uint16_t*)((uint8_t*)&EEPROM + p->Type), p->Data);
+						if(p->Flags == fCMD_Write + fCMD_1b) {
+							eeprom_update_byte((uint8_t*)&EEPROM + p->Type, p->Data);
+						} else {
+							eeprom_update_word((uint16_t*)((uint8_t*)&EEPROM + p->Type), p->Data);
+						}
+						GetSettings();
+						Set_LED_Warning(2);
 					}
-					GetSettings();
-					Set_LED_Warning(2);
-					WriteTimeout = 5; // *0.1 sec
+					WriteTimeout = fCMD_Write_Timeout;
 				}
 				Setup_timer = 255; // sec
 			} else if(p->Flags == fCMD_Set) { // SET command
-				if(p->Type == Type_Set_LED) {
-					uint8_t d = ((p->Data & 1)<<Type_Set_LED);
-					CMD_Set_Flags = (CMD_Set_Flags & ~(1<<Type_Set_LED)) | d;
+				if(p->Type == Type_Set_Lamp) {
+					uint8_t d = ((p->Data & 1)<<Type_Set_Lamp);
+					CMD_Set_Flags = (CMD_Set_Flags & ~(1<<Type_Set_Lamp)) | d;
 					if(!d) LED1_OFF;
 				}
 				Setup_timer = 255; // sec
