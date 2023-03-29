@@ -26,7 +26,7 @@
 
 const char ProgramID[] PROGMEM = "CO2 mini v2";
 
-#define DEBUG_PROTEUS
+//#define DEBUG_PROTEUS
 
 #define LED1_ANODE_TO_VCC
 #define LED1_PORT					PORTA		// Info led
