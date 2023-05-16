@@ -55,7 +55,7 @@ const char ProgramID[] PROGMEM = "CO2 mini v2";
 #define WRN_SETUP_INFO				0x02
 #define WRN_SETUP_ERR				0x10
 #define WRN_RF_Send					0x10	// Send failure, after short bursts = fan offset (mask 0x0F)
-#define WRN_RF_SetAddr				0x20	// Set addresses failure,
+#define WRN_RF_SetAddr				0x10	// Set addresses failure,
 #define WRN_RF_NotResp				0x30	// RF module not response,
 #define WRN_CO2Sensor				0x40	// CO2 Sensor reading failure
 
@@ -77,20 +77,22 @@ struct _EEPROM {
 } __attribute__ ((packed));
 struct _EEPROM EEMEM EEPROM;
 
-#define fCMD_MASK					0xF0 // check mask
 #define fCMD_Write					0x80 // EEPROM[Type] = Data, "fCMD_WriteStart" must be preceded, timeout - fCMD_Write_Timeout
-#define fCMD_Read					0xC0 // read MEM[Data] => Data, MEM type: EEPROM, MAIN, PROGRAM
+#define fCMD_Read					0x40 // read MEM[Data] => Data, MEM: EEPROM, MAIN, PROGRAM
+#define fCMD_Set					0xC0 // Set cmd, Type = cmd id, Data = cmd value
+#define fCMD_WriteStart				0x2F
+// fCMD +
+#define fCMD_EEPROM					0x00	// EEPROM
+#define fCMD_RAM					0x10	// RAM memory
+#define fCMD_PROGMEM				0x20	// Program FLASH
 #define fCMD_1b						0x01
 #define fCMD_2b						0x02
-#define fCMD_RAM					0x08
-#define fCMD_Set					0x40 // Set cmd, Type = cmd id, Data = cmd value
-#define fCMD_WriteStart				0x8F
-#define Type_EEPROM					0	// EEPROM
-#define Type_RAM					1	// main memory (OSCCAL=0x51)
-#define Type_PROGMEM				2	// Program FLASH
-#define Type_PGM_ID					3	// ProgramID(cstring)
-#define Type_RESET					4	// Restart program (fSetup_Read)
-#define Type_Set_Lamp				0	// Lamp ON(Data=1) or OFF(Data=0), bit num
+#define fCMD_4b						0x03
+#define fCMD_8b						0x04
+#define fCMD_CStr					0x05	// #0 = ProgramID
+
+#define Type_Set_Lamp				0	// Lamp ON/OFF, bit num
+#define Type_Set_RESET				14	// Restart program, software reset (Data = 0xEEEE)
 
 #define fCMD_Write_Timeout			3	// *0.1 sec
 
@@ -356,76 +358,85 @@ int main(void)
 			wdt_reset();
 		} while(!NRF_poll);
 		NRF_poll = 0;
-		struct SETUP_DATA *p = (struct SETUP_DATA*)&data;
 		if((Setup_timer || !(Flags & f_TransmitOnly)) && NRF24_Receive((uint8_t*)&data)) {
 			Set_LED_Warning(1);
+			struct SETUP_DATA *p = (struct SETUP_DATA*)&data;
 			register uint8_t cmd = p->Flags;
-			if(cmd == fCMD_WriteStart) {
-				WriteTimeout = fCMD_Write_Timeout;
-			} else if((cmd & fCMD_MASK) == fCMD_Write) { // WRITE command
-				if(WriteTimeout) {
-					if(cmd & fCMD_RAM) {
-						ATOMIC_BLOCK(ATOMIC_FORCEON) {
-							if(cmd & fCMD_2b) *((uint16_t *)(uint16_t)p->Type) = p->Data;
-							else *((uint8_t *)(uint16_t)p->Type) = p->Data;
-						}
-					} else {
-						if(p->Flags == fCMD_Write + fCMD_1b) {
-							eeprom_update_byte((uint8_t*)&EEPROM + p->Type, p->Data);
-						} else {
-							eeprom_update_word((uint16_t*)((uint8_t*)&EEPROM + p->Type), p->Data);
-						}
-						GetSettings();
-						Set_LED_Warning(2);
-					}
-					WriteTimeout = fCMD_Write_Timeout;
-				}
-				Setup_timer = 255; // sec
-			} else if(p->Flags == fCMD_Set) { // SET command
-				if(p->Type == Type_Set_Lamp) {
+			if(cmd == fCMD_Set) { // SET command
+				//int8_t d = p->Data;
+				register uint8_t type = p->Type;
+				if(type == Type_Set_RESET) {
+					if(p->Data != 0xEEEE) continue;
+//xReset:
+					LED1_ON;
+					cli(); while(1) ; // restart
+				} else if(type == Type_Set_Lamp) { // Switch Lamp
 					uint8_t d = ((p->Data & 1)<<Type_Set_Lamp);
 					CMD_Set_Flags = (CMD_Set_Flags & ~(1<<Type_Set_Lamp)) | d;
 					if(!d) LED1_OFF;
 				}
 				Setup_timer = 255; // sec
-			} else if((p->Flags == fCMD_Read + fCMD_1b || p->Flags == fCMD_Read + fCMD_2b)) { // READ command
-				if(p->Type == Type_EEPROM) {
+			} else if(cmd == fCMD_WriteStart) {
+				WriteTimeout = fCMD_Write_Timeout;
+			} else if(cmd & fCMD_Read) { // READ command
+				register uint8_t cmd2 = cmd & 0xF0;
+				cmd &= 0x0F;
+				if(cmd2 == fCMD_Read + fCMD_EEPROM) {
 					if(p->Data < sizeof(struct _EEPROM)) {
-						if(p->Flags == fCMD_Read + fCMD_1b) p->Data = eeprom_read_byte((uint8_t*)&EEPROM + p->Data);
-						else p->Data = eeprom_read_word((uint16_t*)((uint8_t*)&EEPROM + p->Data));
-						p->Type = p->Flags = 0;
+						if(cmd == fCMD_2b) p->Data = eeprom_read_word((uint16_t*)((uint8_t*)&EEPROM + p->Data));
+						else p->Data = eeprom_read_byte((uint8_t*)&EEPROM + p->Data);
+						//p->Type = p->Flags = 0;
 					} else continue;
-				} else if(p->Type == Type_RAM) {
+				} else if(cmd2 == fCMD_Read + fCMD_RAM) {
 					ATOMIC_BLOCK(ATOMIC_FORCEON) {
-						if(p->Flags == fCMD_Read + fCMD_1b) p->Data = *((uint8_t *)p->Data);
-						else p->Data = *((uint16_t *)p->Data);
+						if(cmd == fCMD_2b) p->Data = *((uint16_t *)p->Data);
+						else p->Data = *((uint8_t *)p->Data);
 					}
-					p->Type = p->Flags = 0;
-				} else if(p->Type == Type_PROGMEM) {
-					if(p->Flags == fCMD_Read + fCMD_1b) p->Data = pgm_read_byte(p->Data);
-					else p->Data = pgm_read_word(p->Data);
-					p->Type = p->Flags = 0;
-				} else if(p->Type == Type_RESET) {
-					LED1_ON;
-					cli(); while(1) ; // restart
-				}
+					//p->Type = p->Flags = 0;
+				} else if(cmd2 == fCMD_Read + fCMD_PROGMEM) {
+					if(cmd == fCMD_2b) p->Data = pgm_read_word(p->Data);
+					else if(cmd == fCMD_1b) p->Data = pgm_read_byte(p->Data);
+					//p->Type = p->Flags = 0;
+				} else continue;
 				Delay100ms(1);
 				NRF24_SetMode(NRF24_TransmitMode);
 				uint8_t err = 0;
-				if(p->Type == Type_PGM_ID) {
+				if(cmd == fCMD_CStr) {
 					for(uint8_t i = 0; i < sizeof(ProgramID); i++) {
 						p->Data = pgm_read_byte(&ProgramID[i]);
 						err = NRF24_Transmit((uint8_t *)&data);
 						if(err) break;
+						//Delay10us(255);
 						for(uint8_t j = 0; j < eeprom_read_byte(&EEPROM.RF_Pause); j++) Delay10us(100);
 					}
 				} else err = NRF24_Transmit((uint8_t *)&data);
 				NRF24_SetMode(NRF24_ReceiveMode);
-				if(err) Set_LED_Warning_New(err == 2 ? WRN_RF_NotResp : WRN_SETUP_ERR + err);
+				if(err) Set_LED_Warning_New((err + 1) << 4);
+				Setup_timer = 255; // sec
+			} else if(cmd & fCMD_Write) { // WRITE command
+				if(WriteTimeout) {
+					register uint8_t cmd2 = cmd & 0x30;
+					cmd &= 0x0F;
+					if(cmd2 == fCMD_RAM) {
+						ATOMIC_BLOCK(ATOMIC_FORCEON) {
+							if(cmd == fCMD_2b) *((uint16_t *)(uint16_t)p->Type) = p->Data;
+							else *((uint8_t *)(uint16_t)p->Type) = p->Data;
+						}
+					} else if(cmd2 == fCMD_EEPROM) {
+						if(cmd == fCMD_2b) {
+							eeprom_update_word((uint16_t*)((uint8_t*)&EEPROM + p->Type), p->Data);
+						} else {
+							eeprom_update_byte((uint8_t*)&EEPROM + p->Type, p->Data);
+						}
+						GetSettings();
+						//Set_LED_Warning_New(WRN_SETUP_INFO);
+					}
+					WriteTimeout = fCMD_Write_Timeout;
+				}
 				Setup_timer = 255; // sec
 			}
 			continue;
-		} 
+		}
 		if(Timer == 0) {
 			NRF24_SetMode(NRF24_TransmitMode);
 			data.FanSpeed = data.Flags = 0;
@@ -439,7 +450,7 @@ int main(void)
 					break;
 				}
 				uint8_t err = NRF24_Transmit((uint8_t *)&data);
-				if(err)	Set_LED_Warning(err == 2 ? WRN_RF_NotResp : (WRN_RF_Send + fan + 1));
+				if(err)	Set_LED_Warning(WRN_RF_Send + fan + 1);
 			}
 			if(!Setup_timer && (Flags & f_TransmitOnly)) {
 				NRF24_SET_CE_LOW; // Standby-1
